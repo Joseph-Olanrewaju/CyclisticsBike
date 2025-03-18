@@ -1,0 +1,267 @@
+---
+title: "CyclisticsBike"
+author: "Joseph Olanrewaju"
+date: "2025-03-06"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Installing Packages and Library
+```{r `Loading Libraries`}
+library(tidyverse)
+library(fs)
+library(skimr)
+library(conflicted)
+```
+```{r}
+# Setting dplyr::filter and dplyr::lag as the default choices
+conflict_prefer("filter", "dplyr")
+conflict_prefer("lag", "dplyr")
+
+```
+#=========================
+# STEP 1: COLLECTTING DATA
+#=========================
+## Uploading Divvy datasets (csv files) for data analytics processes 
+
+```{r Reading files into memory}
+cyclistics_q1_2019 <- read_csv("Divvy_Trips_2019_Q1.csv")
+cyclistics_q1_2020 <- read_csv("Divvy_Trips_2020_Q1.csv")
+```
+#=============================================================
+# STEP 2: WRANGLING DATA AND COMBINING THEM INTO A SINGLE FILE
+#=============================================================
+## Comparing column names in each of the files
+```{r Loading Colnames}
+colnames(cyclistics_q1_2019)
+colnames(cyclistics_q1_2020)
+
+```
+
+## Renaming columns  to make them consistent with cyclistics_q1_2020 (as this will be the supposed going-forward table design for Divvy datasets)
+
+```{r Renaming for consistency}
+(cyclistics_q1_2019 <- rename(cyclistics_q1_2019
+                              ,ride_id = trip_id
+                              ,rideable_type = bikeid
+                              ,started_at = start_time
+                              ,ended_at = end_time
+                              ,start_station_name = from_station_name
+                              ,start_station_id = from_station_id
+                              ,end_station_name = to_station_name
+                              ,end_station_id = to_station_id
+                              ,member_casual = usertype
+))
+
+```
+## Inspect the dataframes and look for incongruencies
+```{r Loading sructure of datasets}
+str(cyclistics_q1_2019)
+str(cyclistics_q1_2020)
+
+```
+# Converting ride_id and rideable_type to character so that they can stack correctly
+```{r Converting ride_id}
+cyclistics_q1_2019 <-  mutate(cyclistics_q1_2019, ride_id = as.character(ride_id)
+                              ,rideable_type = as.character(rideable_type)) 
+
+```
+## Stacking individual quarter's data frames into one big data frame
+```{r Stacking the datasets in single df}
+cyclistics_all_trips <- bind_rows(cyclistics_q1_2019, cyclistics_q1_2020)
+
+colnames(cyclistics_all_trips)
+
+```
+## Removing birthyear, gender, lat, long, fields as this data was dropped beginning in 2020
+```{r Removing some features}
+cyclistics_all_trips <- cyclistics_all_trips %>%  
+  select(-c(birthyear, gender,  "tripduration", start_lat, start_lng, end_lat, end_lng))
+
+```
+```{r}
+colnames(cyclistics_all_trips)
+```
+#============================================================
+# STEP 3: CLEANING UP AND ADDING DATA TO PREPARE FOR ANALYSIS
+#============================================================
+## Inspecting the new table that has been created
+```{r }
+colnames(cyclistics_all_trips)  #List of column names
+nrow(cyclistics_all_trips)  #How many rows are in data frame?
+dim(cyclistics_all_trips)  #Dimensions of the data frame?
+head(cyclistics_all_trips)  #See the first 6 rows of data frame.  
+tail(cyclistics_all_trips)  #See the last 6 rows of data frame
+str(cyclistics_all_trips)  #See list of columns and data types (numeric, character, etc)
+summary(cyclistics_all_trips)  #Statistical summary of data. Mainly for numerics
+
+```
+## Observations that falls under each ridertype
+```{r}
+table(cyclistics_all_trips$member_casual)
+```
+## Reassigning labels to the desired values (I go with the current 2020 labels)
+```{r Changing Labels}
+cyclistics_all_trips <-  cyclistics_all_trips %>% 
+  mutate(member_casual = recode(member_casual
+                                ,"Subscriber" = "member"
+                                ,"Customer" = "casual"))
+
+```
+## Checking to ensure the proper number of observations were reassigned
+```{r }
+table(cyclistics_all_trips$member_casual)
+
+```
+## Adding columns that list the date, month, day, and year of each ride
+### This will allow us to aggregate ride data for each month, day, or year ... before completing these operations we could only aggregate at the ride level
+```{r}
+cyclistics_all_trips$date <- as.Date(cyclistics_all_trips$started_at) #The default format is yyyy-mm-dd
+cyclistics_all_trips$month <- format(as.Date(cyclistics_all_trips$date), "%m")
+cyclistics_all_trips$day <- format(as.Date(cyclistics_all_trips$date), "%d")
+cyclistics_all_trips$year <- format(as.Date(cyclistics_all_trips$date), "%Y")
+cyclistics_all_trips$day_of_week <- format(as.Date(cyclistics_all_trips$date), "%A")
+
+```
+## Adding "ride_length" calculation to cyclistics_all_trips (in seconds)
+```{r}
+cyclistics_all_trips$ride_length <- 
+  difftime(cyclistics_all_trips$ended_at, cyclistics_all_trips$started_at)
+```
+##Inspecting the structure of the columns
+```{r}
+str(cyclistics_all_trips)
+
+```
+## Convert "ride_length" from Factor to numeric so we can run calculations on the data
+```{r}
+is.factor(cyclistics_all_trips$ride_length)
+cyclistics_all_trips$ride_length <- as.numeric(as.character(cyclistics_all_trips$ride_length))
+is.numeric(cyclistics_all_trips$ride_length)
+
+```
+## Removing "bad" data
+### The dataframe includes a few hundred entries when bikes were taken out of docks and checked for quality by Divvy or ride_length was negative
+### We will create a new version of the dataframe (v2) since data is being removed
+```{r}
+cyclistics_all_trips_v2 <- cyclistics_all_trips[!(cyclistics_all_trips$start_station_name == "HQ QR" | cyclistics_all_trips$ride_length<0),]
+```
+#========================================
+# STEP 4: CONDUCTING DESCRIPTIVE ANALYSIS
+#========================================
+## Descriptive analysis on ride_length (all figures in seconds)
+```{r}
+mean(cyclistics_all_trips_v2$ride_length) #straight average (total ride length / rides)
+median(cyclistics_all_trips_v2$ride_length) #midpoint number in the ascending array of ride lengths
+max(cyclistics_all_trips_v2$ride_length) #longest ride
+min(cyclistics_all_trips_v2$ride_length) #shortest ride
+
+```
+## Condensed as below
+```{r}
+summary(cyclistics_all_trips_v2$ride_length)
+
+```
+## Compare members and casual users
+```{r}
+aggregate(cyclistics_all_trips_v2$ride_length ~ cyclistics_all_trips_v2$member_casual, FUN = mean)
+aggregate(cyclistics_all_trips_v2$ride_length ~ cyclistics_all_trips_v2$member_casual, FUN = median)
+aggregate(cyclistics_all_trips_v2$ride_length ~ cyclistics_all_trips_v2$member_casual, FUN = max)
+aggregate(cyclistics_all_trips_v2$ride_length ~ cyclistics_all_trips_v2$member_casual, FUN = min)
+
+```
+## Viewing the average ride time by each day for members vs casual users
+```{r}
+aggregate(cyclistics_all_trips_v2$ride_length ~ cyclistics_all_trips_v2$member_casual + cyclistics_all_trips_v2$day_of_week, FUN = mean)
+
+```
+## Fixing the order of the days of the week.
+```{r}
+cyclistics_all_trips_v2$day_of_week <- ordered(cyclistics_all_trips_v2$day_of_week, levels=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+aggregate(cyclistics_all_trips_v2$ride_length ~ cyclistics_all_trips_v2$member_casual + cyclistics_all_trips_v2$day_of_week, FUN = mean)
+```
+## analyzing ridership data by type and weekdays
+```{r}
+cyclistics_all_trips_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>%  #creates weekday field using wday()
+  group_by(member_casual, weekday) %>%  #groups by usertype and weekday
+  summarise(number_of_rides = n()							#calculates the number of rides and average duration 
+            ,average_duration = mean(ride_length)) %>% 		# calculates the average duration
+  arrange(member_casual, weekday)								# sorts
+
+
+```
+#======================================================================
+# STEP 5: EXPORTING SUMMARY FILE FOR FURTHER ANALYSIS & VISUALIZATIONS
+#======================================================================
+## Creating a csv file that we will visualize in Tableau for my presentations to the stakeholders.
+```{r}
+counts <- aggregate(cyclistics_all_trips_v2$ride_length ~ cyclistics_all_trips_v2$member_casual + cyclistics_all_trips_v2$day_of_week, FUN = mean)
+write.csv(counts, file = "C:\\Users\\multi\\Document\\cyclistics_avg_ride_length2.csv")
+
+```
+## Visualizing the Average Ride Length by Rider Type
+```{r, echo=FALSE, out.width="80%"}
+library(knitr)
+library(htmltools)
+
+## Path to the image below
+knitr::include_graphics("AvgRideLength_by_RiderType (2).png")
+
+```
+## Visualizing the Average Ride Length Trends Across Week Days by Rider Type
+```{r, echo=FALSE, out.width="80%"}
+library(knitr)
+library(htmltools)
+
+## Path to the image below
+knitr::include_graphics("RideLength_Trends_Across_WeekDays.png")
+
+```
+**🔗 View the interactive visualization on my Tableau profile:**
+[Click here to view the full Tableau Dashboard](https://public.tableau.com/views/CyclisticsVizV2/ReportDashboard?:language=en-US&:sid=&:redirect=auth&:display_count=n&:origin=viz_share_link)
+
+
+##Key Insights for Marketing Strategy:
+1. Casual Riders Have Higher Ride Lengths on Thursdays 
+
+    *Thursday stands out with an average ride length of 133.8 minutes for casual riders.
+
+    *This suggests that casual riders may be using bikes for leisure or long trips, possibly after work or during flexible schedules.
+
+2. Consistent Low Ride Length for Members
+
+    *Members have a stable and much shorter ride length across all days.
+    *This suggests they use bikes more for short, consistent commutes rather than leisure.
+
+3. Weekend Potential for Conversion
+
+    *Casual riders still maintain a relatively higher ride length on Fridays (59.9 min) and Saturdays (60.3 min).
+    *This means they might be more engaged in recreational or social rides, making weekends a great time to target them with membership promotions.
+    
+
+##Suggested Marketing Strategies to Convert Casual Riders to Members:
+1. Thursday & Weekend Promotions
+
+    - Offer discounts on annual memberships if they sign up after a Thursday ride.
+    - Provide a "Weekend Membership Trial" where casual riders can get a limited-time free trial.
+
+2. Highlight Cost Savings
+
+    - Show casual riders how members pay less per ride compared to their long ride durations.
+    Example: "If you ride 60+ minutes every Saturday, a membership saves you X amount per month!"
+
+3. Introduce Referral Incentives
+
+    - Reward casual riders if they refer a friend and both become members.
+
+4. Targeted In-App & Email Campaigns
+
+    -Send push notifications on Wednesdays & Thursdays, reminding them about membership benefits before their usual long Thursday rides.
+    
+
